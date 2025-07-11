@@ -644,53 +644,130 @@
             USE_GITHUB: false // 暂时关闭，避免错误
         };
 
-        // 简化云端数据管理器（使用localStorage + 模拟云端同步）
+        // 真正的云端数据管理器（使用JSONBin.io）
         class CrossDeviceDataManager {
             constructor() {
-                this.isConnected = true; // 简化版本，总是显示连接成功
+                // 🔧 JSONBin.io配置 - 已配置完成
+                this.binId = '68706a736063391d31ab3343';  // 您的Bin ID
+                this.masterKey = '$2a$10$uCxtZqayQ/lrH48pAArAO.Geg3fL1LNMPb4yf1is5h8bV5ALrNxhq';  // 您的Master Key
+                
+                this.apiUrl = 'https://api.jsonbin.io/v3/b';
+                this.isConnected = false;
                 this.cloudData = null;
             }
 
             async testConnection() {
-                // 模拟网络延迟
-                await new Promise(resolve => setTimeout(resolve, 500));
-                this.isConnected = true;
-                return true;
+                try {
+                    const response = await fetch(`${this.apiUrl}/${this.binId}/latest`, {
+                        method: 'GET',
+                        headers: {
+                            'X-Master-Key': this.masterKey
+                        }
+                    });
+                    
+                    this.isConnected = response.ok;
+                    console.log(this.isConnected ? '✅ 云端数据库连接成功' : '❌ 云端数据库连接失败');
+                    return this.isConnected;
+                } catch (error) {
+                    console.warn('连接测试失败:', error);
+                    this.isConnected = false;
+                    return false;
+                }
             }
 
             async saveDeviceData(deviceData) {
                 try {
-                    // 保存到本地存储（主要数据）
-                    let allCloudData = JSON.parse(localStorage.getItem('cloud_game_data') || '{}');
-                    if (!allCloudData.devices) {
-                        allCloudData.devices = {};
+                    if (this.binId === 'YOUR_BIN_ID_HERE') {
+                        console.warn('⚠️ 请先配置JSONBin.io的Bin ID和Master Key');
+                        return this.saveToLocalStorage(deviceData);
                     }
+
+                    // 先获取现有数据
+                    const existingData = await this.loadAllData() || { devices: {} };
                     
-                    allCloudData.devices[deviceData.deviceId] = deviceData;
-                    allCloudData.lastUpdated = new Date().toISOString();
+                    // 更新设备数据
+                    existingData.devices[deviceData.deviceId] = deviceData;
+                    existingData.lastUpdated = new Date().toISOString();
                     
-                    localStorage.setItem('cloud_game_data', JSON.stringify(allCloudData));
+                    // 保存到云端
+                    const response = await fetch(`${this.apiUrl}/${this.binId}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Master-Key': this.masterKey
+                        },
+                        body: JSON.stringify(existingData)
+                    });
                     
-                    // 模拟云端同步延迟
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                    
-                    console.log('✅ 数据已保存到云端数据库');
-                    return true;
+                    if (response.ok) {
+                        // 同时保存到本地作为备份
+                        localStorage.setItem('cloud_game_data', JSON.stringify(existingData));
+                        console.log('✅ 数据已同步到云端数据库');
+                        return true;
+                    } else {
+                        throw new Error('云端保存失败');
+                    }
                 } catch (error) {
-                    console.warn('保存设备数据失败:', error);
-                    return false;
+                    console.warn('云端保存失败，使用本地存储:', error);
+                    return this.saveToLocalStorage(deviceData);
                 }
             }
 
             async loadAllData() {
                 try {
-                    // 模拟网络延迟
-                    await new Promise(resolve => setTimeout(resolve, 100));
+                    if (this.binId === 'YOUR_BIN_ID_HERE') {
+                        console.warn('⚠️ 请先配置JSONBin.io的Bin ID和Master Key');
+                        return this.loadFromLocalStorage();
+                    }
+
+                    const response = await fetch(`${this.apiUrl}/${this.binId}/latest`, {
+                        method: 'GET',
+                        headers: {
+                            'X-Master-Key': this.masterKey
+                        }
+                    });
                     
+                    if (response.ok) {
+                        const result = await response.json();
+                        console.log('✅ 从云端加载数据成功');
+                        
+                        // 同时保存到本地作为备份
+                        localStorage.setItem('cloud_game_data', JSON.stringify(result.record));
+                        
+                        return result.record;
+                    } else {
+                        throw new Error('云端加载失败');
+                    }
+                } catch (error) {
+                    console.warn('云端加载失败，使用本地数据:', error);
+                    return this.loadFromLocalStorage();
+                }
+            }
+
+            // 备用方案：本地存储
+            saveToLocalStorage(deviceData) {
+                try {
+                    let allCloudData = JSON.parse(localStorage.getItem('cloud_game_data') || '{}');
+                    if (!allCloudData.devices) {
+                        allCloudData.devices = {};
+                    }
+                    allCloudData.devices[deviceData.deviceId] = deviceData;
+                    allCloudData.lastUpdated = new Date().toISOString();
+                    localStorage.setItem('cloud_game_data', JSON.stringify(allCloudData));
+                    console.log('💾 数据已保存到本地存储');
+                    return true;
+                } catch (error) {
+                    console.error('本地存储失败:', error);
+                    return false;
+                }
+            }
+
+            loadFromLocalStorage() {
+                try {
                     const data = localStorage.getItem('cloud_game_data');
                     return data ? JSON.parse(data) : { devices: {} };
                 } catch (error) {
-                    console.warn('加载数据失败:', error);
+                    console.error('本地加载失败:', error);
                     return { devices: {} };
                 }
             }
@@ -864,37 +941,65 @@
             }
         }
 
-        function getLeaderboard() {
-            let players = JSON.parse(localStorage.getItem('cigarette_players') || '[]');
-            return players.sort((a, b) => b.bestScore - a.bestScore);
-        }
-
-
-
-        // 界面切换
-        function showScreen(screenName) {
-            loginScreen.style.display = 'none';
-            gameScreen.style.display = 'none';
-            leaderboardScreen.style.display = 'none';
-            
-            document.getElementById(screenName + 'Screen').style.display = 'block';
-        }
-
-        function enterGame() {
-            const playerName = document.getElementById('playerName').value.trim();
-            if (!playerName) {
-                alert('请输入昵称！');
-                return;
+        async function getLeaderboard() {
+            try {
+                // 从云端加载所有设备数据
+                const allData = await dataManager.loadAllData();
+                let allPlayers = [];
+                
+                if (allData && allData.devices) {
+                    // 从所有设备收集玩家数据
+                    Object.values(allData.devices).forEach(device => {
+                        if (device.games && device.games.length > 0) {
+                            const devicePlayers = {};
+                            device.games.forEach(game => {
+                                if (!devicePlayers[game.player]) {
+                                    devicePlayers[game.player] = {
+                                        name: game.player,
+                                        bestScore: game.score,
+                                        totalGames: 1,
+                                        lastPlayed: game.timestamp,
+                                        deviceId: device.deviceId
+                                    };
+                                } else {
+                                    devicePlayers[game.player].totalGames++;
+                                    if (game.score > devicePlayers[game.player].bestScore) {
+                                        devicePlayers[game.player].bestScore = game.score;
+                                        devicePlayers[game.player].lastPlayed = game.timestamp;
+                                    }
+                                }
+                            });
+                            allPlayers = allPlayers.concat(Object.values(devicePlayers));
+                        }
+                    });
+                }
+                
+                // 合并相同用户名的玩家数据
+                const mergedPlayers = {};
+                allPlayers.forEach(player => {
+                    if (!mergedPlayers[player.name]) {
+                        mergedPlayers[player.name] = player;
+                    } else {
+                        mergedPlayers[player.name].totalGames += player.totalGames;
+                        if (player.bestScore > mergedPlayers[player.name].bestScore) {
+                            mergedPlayers[player.name].bestScore = player.bestScore;
+                            mergedPlayers[player.name].lastPlayed = player.lastPlayed;
+                        }
+                    }
+                });
+                
+                console.log('✅ 云端排行榜加载成功，共' + Object.keys(mergedPlayers).length + '名玩家');
+                return Object.values(mergedPlayers).sort((a, b) => b.bestScore - a.bestScore);
+            } catch (error) {
+                console.warn('获取云端排行榜失败，使用本地数据:', error);
+                // 备用方案：使用本地数据
+                let players = JSON.parse(localStorage.getItem('cigarette_players') || '[]');
+                return players.sort((a, b) => b.bestScore - a.bestScore);
             }
-            
-            gameState.currentPlayer = playerName;
-            currentPlayerElement.textContent = playerName;
-            showScreen('game');
-            resizeCanvas();
         }
 
-        function showLeaderboard() {
-            updateLeaderboardDisplay();
+        async function showLeaderboard() {
+            await updateLeaderboardDisplay();
             showScreen('leaderboard');
         }
 
@@ -930,38 +1035,72 @@
             showScreen('login');
         }
 
-        function updateLeaderboardDisplay() {
-            const leaderboard = getLeaderboard();
+        async function updateLeaderboardDisplay() {
             const leaderboardDiv = document.getElementById('leaderboard');
             
-            if (leaderboard.length === 0) {
-                leaderboardDiv.innerHTML = '<p style="text-align: center; color: #8d6e63; font-size: 1.2rem; margin: 40px 0;">暂无排行榜数据</p>';
+            // 显示加载状态
+            leaderboardDiv.innerHTML = '<p style="text-align: center; color: #667eea; font-size: 1.2rem; margin: 40px 0;">🔄 正在加载全球排行榜...</p>';
+            
+            try {
+                const leaderboard = await getLeaderboard();
+                
+                if (leaderboard.length === 0) {
+                    leaderboardDiv.innerHTML = '<p style="text-align: center; color: #8d6e63; font-size: 1.2rem; margin: 40px 0;">暂无排行榜数据</p>';
+                    return;
+                }
+                
+                let html = '';
+                leaderboard.forEach((player, index) => {
+                    const rank = index + 1;
+                    const isCurrentUser = player.name === gameState.currentPlayer;
+                    
+                    let rankClass = '';
+                    if (rank === 1) rankClass = 'first';
+                    else if (rank === 2) rankClass = 'second';
+                    else if (rank === 3) rankClass = 'third';
+                    
+                    const lastPlayed = player.lastPlayed ? new Date(player.lastPlayed).toLocaleString() : '未知';
+                    
+                    html += `
+                        <div class="leaderboard-item ${isCurrentUser ? 'current-user' : ''}">
+                            <div class="rank ${rankClass}">${rank}</div>
+                            <div class="player-name">
+                                ${player.name}
+                                <div style="font-size: 0.8rem; color: #8d6e63;">${player.totalGames}局 | ${lastPlayed}</div>
+                            </div>
+                            <div class="score">${player.bestScore}根</div>
+                        </div>
+                    `;
+                });
+                
+                leaderboardDiv.innerHTML = html;
+                console.log('✅ 全球排行榜显示成功');
+            } catch (error) {
+                console.error('更新排行榜失败:', error);
+                leaderboardDiv.innerHTML = '<p style="text-align: center; color: #f44336; font-size: 1.2rem; margin: 40px 0;">❌ 加载排行榜失败</p>';
+            }
+        }
+
+        // 界面切换
+        function showScreen(screenName) {
+            loginScreen.style.display = 'none';
+            gameScreen.style.display = 'none';
+            leaderboardScreen.style.display = 'none';
+            
+            document.getElementById(screenName + 'Screen').style.display = 'block';
+        }
+
+        function enterGame() {
+            const playerName = document.getElementById('playerName').value.trim();
+            if (!playerName) {
+                alert('请输入昵称！');
                 return;
             }
             
-            let html = '';
-            leaderboard.forEach((player, index) => {
-                const rank = index + 1;
-                const isCurrentUser = player.name === gameState.currentPlayer;
-                
-                let rankClass = '';
-                if (rank === 1) rankClass = 'first';
-                else if (rank === 2) rankClass = 'second';
-                else if (rank === 3) rankClass = 'third';
-                
-                html += `
-                    <div class="leaderboard-item ${isCurrentUser ? 'current-user' : ''}">
-                        <div class="rank ${rankClass}">${rank}</div>
-                        <div class="player-name">
-                            ${player.name}
-                            <div style="font-size: 0.8rem; color: #8d6e63;">${player.totalGames}局 | ${player.lastPlayed}</div>
-                        </div>
-                        <div class="score">${player.bestScore}根</div>
-                    </div>
-                `;
-            });
-            
-            leaderboardDiv.innerHTML = html;
+            gameState.currentPlayer = playerName;
+            currentPlayerElement.textContent = playerName;
+            showScreen('game');
+            resizeCanvas();
         }
 
         // 香烟类
